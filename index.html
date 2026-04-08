@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BillProof — Fraud-Proof Billing on Polygon</title>
+<!-- ethers v6 (CDN) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
+<!-- QR Code -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg:     #0a0e1a;
+    --bg2:    #0f1525;
+    --bg3:    #141c30;
+    --card:   #1a2235;
+    --border: rgba(99,179,237,0.15);
+    --border2:rgba(99,179,237,0.3);
+    --blue:   #63b3ed;
+    --blue2:  #4299e1;
+    --green:  #68d391;
+    --red:    #fc8181;
+    --amber:  #f6ad55;
+    --text:   #e2e8f0;
+    --muted:  #718096;
+    --mono:   'JetBrains Mono', monospace;
+    --sans:   'Space Grotesk', sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:var(--sans); background:var(--bg); color:var(--text); min-height:100vh; }
+
+  /* NAV */
+  nav {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:1rem 2rem;
+    border-bottom:1px solid var(--border);
+    background:rgba(10,14,26,0.95);
+    backdrop-filter:blur(10px);
+    position:sticky; top:0; z-index:100;
+  }
+  .logo {
+    font-size:1.4rem; font-weight:700;
+    background:linear-gradient(135deg,var(--blue),#9f7aea);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  }
+  .nav-right { display:flex; align-items:center; gap:12px; }
+  .network-badge {
+    font-family:var(--mono); font-size:0.7rem;
+    background:rgba(99,179,237,0.1); border:1px solid var(--border2);
+    color:var(--blue); padding:4px 12px; border-radius:20px;
+  }
+  #wallet-btn {
+    display:flex; align-items:center; gap:8px;
+    background:rgba(99,179,237,0.1); border:1px solid var(--border2);
+    color:var(--blue); padding:8px 16px; border-radius:8px;
+    cursor:pointer; font-family:var(--sans); font-size:0.85rem; font-weight:500;
+    transition:all 0.2s;
+  }
+  #wallet-btn:hover { background:rgba(99,179,237,0.2); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--red); }
+  .dot.connected { background:var(--green); }
+
+  /* HERO */
+  .hero {
+    text-align:center; padding:4rem 2rem 2.5rem;
+    position:relative; overflow:hidden;
+  }
+  .hero::before {
+    content:'';
+    position:absolute; top:-100px; left:50%; transform:translateX(-50%);
+    width:600px; height:600px;
+    background:radial-gradient(circle,rgba(99,179,237,0.07) 0%,transparent 70%);
+    pointer-events:none;
+  }
+  .hero-tag {
+    font-family:var(--mono); font-size:0.75rem; color:var(--blue);
+    letter-spacing:2px; text-transform:uppercase; margin-bottom:1.2rem;
+  }
+  .hero h1 {
+    font-size:clamp(2.2rem,5vw,4rem); font-weight:700;
+    line-height:1.1; letter-spacing:-1px; margin-bottom:1rem;
+  }
+  .hero h1 span { color:var(--blue); }
+  .hero p { font-size:1.05rem; color:var(--muted); max-width:480px; margin:0 auto 2rem; line-height:1.6; }
+
+  /* STATS BAR */
+  .stats-bar {
+    display:flex; justify-content:center; gap:2rem; flex-wrap:wrap;
+    padding:1.2rem 2rem;
+    border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+    background:var(--bg3); margin-bottom:2.5rem;
+  }
+  .stat { text-align:center; }
+  .stat-num { font-size:1.6rem; font-weight:700; color:var(--blue); font-family:var(--mono); }
+  .stat-label { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+
+  /* TABS */
+  .tabs {
+    display:flex; justify-content:center; gap:4px;
+    background:var(--bg3); border:1px solid var(--border);
+    border-radius:12px; padding:4px;
+    width:fit-content; margin:0 auto 2.5rem;
+  }
+  .tab {
+    padding:10px 28px; border-radius:8px; cursor:pointer;
+    font-weight:500; font-size:0.9rem; transition:all 0.2s;
+    color:var(--muted); border:none; background:transparent;
+    font-family:var(--sans);
+  }
+  .tab.active { background:var(--card); color:var(--text); box-shadow:0 2px 8px rgba(0,0,0,0.3); }
+
+  /* PANELS */
+  .panel { display:none; max-width:760px; margin:0 auto; padding:0 1.5rem 4rem; }
+  .panel.active { display:block; }
+
+  /* CARD */
+  .card {
+    background:var(--card); border:1px solid var(--border);
+    border-radius:16px; padding:2rem; margin-bottom:1.5rem;
+  }
+  .card-title {
+    font-size:1rem; font-weight:600; color:var(--text);
+    margin-bottom:1.5rem; display:flex; align-items:center; gap:8px;
+  }
+  .card-title .icon {
+    width:32px; height:32px; border-radius:8px;
+    background:rgba(99,179,237,0.1); border:1px solid var(--border2);
+    display:flex; align-items:center; justify-content:center; font-size:15px;
+  }
+
+  /* FORM */
+  .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem; }
+  .form-grid.full { grid-template-columns:1fr; }
+  .form-group { display:flex; flex-direction:column; gap:6px; }
+  label { font-size:0.8rem; color:var(--muted); font-weight:500; }
+  input, textarea, select {
+    background:var(--bg2); border:1px solid var(--border);
+    border-radius:8px; padding:10px 14px;
+    color:var(--text); font-family:var(--sans); font-size:0.9rem;
+    outline:none; transition:border-color 0.2s; width:100%;
+  }
+  input:focus, textarea:focus, select:focus { border-color:var(--blue2); }
+  textarea { resize:vertical; min-height:80px; }
+  select option { background:var(--bg2); }
+
+  /* BUTTONS */
+  .btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    padding:12px 28px; border-radius:10px; cursor:pointer;
+    font-family:var(--sans); font-size:0.9rem; font-weight:600;
+    transition:all 0.2s; border:none;
+  }
+  .btn-primary { background:linear-gradient(135deg,var(--blue2),#9f7aea); color:white; }
+  .btn-primary:hover { opacity:0.88; transform:translateY(-1px); }
+  .btn-outline {
+    background:transparent; border:1px solid var(--border2); color:var(--blue);
+  }
+  .btn-outline:hover { background:rgba(99,179,237,0.1); }
+  .btn-block { width:100%; }
+  .btn:disabled { opacity:0.5; cursor:not-allowed; transform:none !important; }
+
+  /* STATUS */
+  .status {
+    border-radius:10px; padding:1rem 1.25rem;
+    font-size:0.88rem; font-weight:500;
+    display:none; align-items:flex-start; gap:10px;
+    margin-top:1rem; line-height:1.5;
+  }
+  .status.show { display:flex; }
+  .status.success { background:rgba(104,211,145,0.1); border:1px solid rgba(104,211,145,0.3); color:var(--green); }
+  .status.error   { background:rgba(252,129,129,0.1); border:1px solid rgba(252,129,129,0.3); color:var(--red); }
+  .status.info    { background:rgba(99,179,237,0.1);  border:1px solid var(--border2); color:var(--blue); }
+  .status.warning { background:rgba(246,173,85,0.1);  border:1px solid rgba(246,173,85,0.3); color:var(--amber); }
+
+  /* HASH BOX */
+  .hash-box {
+    background:var(--bg); border:1px solid var(--border);
+    border-radius:8px; padding:12px 16px;
+    font-family:var(--mono); font-size:0.72rem; color:var(--blue);
+    word-break:break-all; line-height:1.6; margin-top:1rem;
+  }
+  .hash-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+  .hash-label { font-size:0.7rem; color:var(--muted); font-family:var(--mono); }
+  .copy-btn {
+    font-size:0.7rem; background:rgba(99,179,237,0.1); border:1px solid var(--border2);
+    color:var(--blue); padding:2px 8px; border-radius:4px; cursor:pointer;
+    font-family:var(--mono);
+  }
+  .copy-btn:hover { background:rgba(99,179,237,0.2); }
+
+  /* QR */
+  .qr-section {
+    display:none; flex-direction:column; align-items:center;
+    gap:1rem; padding:1.5rem;
+  }
+  .qr-section.show { display:flex; }
+  #qr-container {
+    background:white; padding:16px; border-radius:12px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .qr-hint { font-size:0.8rem; color:var(--muted); text-align:center; max-width:280px; }
+
+  /* VERIFY RESULT */
+  .verify-result {
+    border-radius:16px; padding:2.5rem;
+    text-align:center; display:none; margin-top:1.5rem;
+  }
+  .verify-result.show { display:block; }
+  .verify-result.legit { background:rgba(104,211,145,0.07); border:2px solid rgba(104,211,145,0.4); }
+  .verify-result.fake  { background:rgba(252,129,129,0.07); border:2px solid rgba(252,129,129,0.4); }
+  .verify-icon { font-size:3.5rem; margin-bottom:1rem; }
+  .verify-result h2 { font-size:1.5rem; font-weight:700; margin-bottom:0.5rem; }
+  .verify-result.legit h2 { color:var(--green); }
+  .verify-result.fake  h2 { color:var(--red); }
+  .verify-detail {
+    margin-top:1.5rem; background:rgba(255,255,255,0.03);
+    border-radius:10px; padding:1.2rem; text-align:left;
+    font-family:var(--mono); font-size:0.72rem; line-height:2;
+    color:var(--muted);
+  }
+  .verify-detail span { color:var(--text); }
+
+  /* LEDGER */
+  #ledger-wrap { display:none; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+  th {
+    text-align:left; padding:10px 14px;
+    color:var(--muted); font-weight:500; font-size:0.75rem;
+    border-bottom:1px solid var(--border); text-transform:uppercase; letter-spacing:0.5px;
+  }
+  td { padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.04); }
+  tr:last-child td { border-bottom:none; }
+  .pill {
+    font-size:0.7rem; padding:3px 10px; border-radius:20px;
+    font-weight:600; font-family:var(--mono);
+  }
+  .pill.ok     { background:rgba(104,211,145,0.15); color:var(--green); border:1px solid rgba(104,211,145,0.3); }
+  .pill.chain  { background:rgba(99,179,237,0.15);  color:var(--blue);  border:1px solid var(--border2); }
+  #ledger-empty { text-align:center; padding:3rem; color:var(--muted); font-size:0.9rem; }
+
+  /* SPINNER */
+  .spinner {
+    display:inline-block; width:14px; height:14px;
+    border:2px solid rgba(255,255,255,0.3); border-top-color:#fff;
+    border-radius:50%; animation:spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* CHAIN PROOF CARD */
+  .chain-proof {
+    display:none; margin-top:1rem;
+    background:rgba(99,179,237,0.05); border:1px solid var(--border2);
+    border-radius:12px; padding:1.25rem;
+  }
+  .chain-proof.show { display:block; }
+  .chain-proof-title { font-size:0.8rem; color:var(--blue); font-weight:600; margin-bottom:0.75rem; }
+  .chain-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  .chain-key { font-size:0.75rem; color:var(--muted); }
+  .chain-val { font-size:0.75rem; color:var(--text); font-family:var(--mono); }
+  .polygonscan-link {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:0.78rem; color:var(--blue); text-decoration:none;
+    margin-top:0.75rem; padding:6px 12px;
+    background:rgba(99,179,237,0.1); border:1px solid var(--border2);
+    border-radius:6px; transition:background 0.2s;
+  }
+  .polygonscan-link:hover { background:rgba(99,179,237,0.2); }
+
+  /* CONNECT OVERLAY */
+  #connect-overlay {
+    position:fixed; inset:0; z-index:200;
+    background:rgba(10,14,26,0.92); backdrop-filter:blur(8px);
+    display:flex; align-items:center; justify-content:center;
+  }
+  #connect-overlay.hidden { display:none; }
+  .connect-box {
+    background:var(--card); border:1px solid var(--border2);
+    border-radius:20px; padding:3rem 2.5rem; text-align:center; max-width:380px;
+  }
+  .connect-box h2 { font-size:1.5rem; font-weight:700; margin-bottom:0.75rem; }
+  .connect-box p  { color:var(--muted); font-size:0.9rem; line-height:1.6; margin-bottom:2rem; }
+  .metamask-icon { font-size:3rem; margin-bottom:1rem; }
+
+  @media (max-width:600px) {
+    .form-grid { grid-template-columns:1fr; }
+    .hero h1   { font-size:2rem; }
+    nav        { padding:0.75rem 1rem; }
+    .stats-bar { gap:1.2rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- CONNECT WALLET OVERLAY -->
+<div id="connect-overlay">
+  <div class="connect-box">
+    <div class="metamask-icon">🦊</div>
+    <h2>Connect Wallet</h2>
+    <p>BillProof writes bill hashes directly to the <strong>Polygon blockchain</strong>. Connect MetaMask to issue or verify bills on-chain.</p>
+    <button class="btn btn-primary btn-block" onclick="connectWallet()">Connect MetaMask</button>
+    <p style="margin-top:1rem; font-size:0.78rem; color:var(--muted);">No MetaMask? <a href="https://metamask.io" target="_blank" style="color:var(--blue);">Install it here →</a></p>
+  </div>
+</div>
+
+<!-- NAV -->
+<nav>
+  <div class="logo">⬡ BillProof</div>
+  <div class="nav-right">
+    <span class="network-badge" id="network-badge">Polygon Amoy</span>
+    <button id="wallet-btn" onclick="connectWallet()">
+      <span class="dot" id="wallet-dot"></span>
+      <span id="wallet-label">Connect Wallet</span>
+    </button>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <p class="hero-tag">🔗 Live on Polygon Blockchain</p>
+  <h1>Bills that can't be <span>faked</span></h1>
+  <p>Issue bills that are permanently anchored on Polygon. Anyone can verify authenticity by checking the immutable on-chain hash — no middleman, no database.</p>
+</div>
+
+<!-- STATS -->
+<div class="stats-bar">
+  <div class="stat">
+    <div class="stat-num" id="stat-total">0</div>
+    <div class="stat-label">Bills On-Chain</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num" id="stat-verified">0</div>
+    <div class="stat-label">Verified This Session</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num" id="stat-flagged">0</div>
+    <div class="stat-label">Flagged Fake</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num" style="font-size:1rem; padding-top:4px;" id="stat-contract">—</div>
+    <div class="stat-label">Contract Address</div>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+  <button class="tab active" onclick="switchTab(0)">🧾 Issue Bill</button>
+  <button class="tab"        onclick="switchTab(1)">🔎 Verify Bill</button>
+  <button class="tab"        onclick="switchTab(2)">📒 Ledger</button>
+</div>
+
+<!-- ============================================================ -->
+<!-- PANEL 0 — ISSUE -->
+<!-- ============================================================ -->
+<div class="panel active" id="panel-0">
+
+  <div class="card">
+    <div class="card-title"><span class="icon">📝</span>Bill Details</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Invoice Number *</label>
+        <input id="inv-num" type="text" placeholder="INV-2024-001">
+      </div>
+      <div class="form-group">
+        <label>Date *</label>
+        <input id="inv-date" type="date">
+      </div>
+      <div class="form-group">
+        <label>Vendor / Issuer *</label>
+        <input id="vendor" type="text" placeholder="Acme Pvt. Ltd.">
+      </div>
+      <div class="form-group">
+        <label>Customer / Recipient *</label>
+        <input id="customer" type="text" placeholder="Rahul Sharma">
+      </div>
+      <div class="form-group">
+        <label>Amount (₹) *</label>
+        <input id="amount" type="number" placeholder="15000">
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="category">
+          <option value="services">Services</option>
+          <option value="goods">Goods / Products</option>
+          <option value="consulting">Consulting</option>
+          <option value="medical">Medical</option>
+          <option value="utilities">Utilities</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-grid full">
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="desc" placeholder="Brief description of services rendered…"></textarea>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-block" id="issue-btn" onclick="issueBill()">
+      <span id="issue-spinner" style="display:none" class="spinner"></span>
+      <span id="issue-btn-text">🔗 Register on Blockchain</span>
+    </button>
+
+    <div class="status" id="issue-status"></div>
+  </div>
+
+  <!-- RESULT CARD -->
+  <div class="card" id="result-card" style="display:none">
+    <div class="card-title"><span class="icon">✅</span>On-Chain Registration Proof</div>
+
+    <div class="hash-box">
+      <div class="hash-row">
+        <span class="hash-label">Bill Hash (keccak256)</span>
+        <span class="copy-btn" onclick="copyText('hash-display')">copy</span>
+      </div>
+      <div id="hash-display">—</div>
+    </div>
+
+    <div class="chain-proof show" id="chain-proof-card">
+      <div class="chain-proof-title">⬡ Blockchain Proof</div>
+      <div class="chain-row"><span class="chain-key">Transaction Hash</span><span class="chain-val" id="tx-display">—</span></div>
+      <div class="chain-row"><span class="chain-key">Block Number</span><span class="chain-val" id="block-display">—</span></div>
+      <div class="chain-row"><span class="chain-key">Network</span><span class="chain-val">Polygon Amoy Testnet</span></div>
+      <div class="chain-row"><span class="chain-key">Gas Used</span><span class="chain-val" id="gas-display">—</span></div>
+      <a id="polygonscan-link" class="polygonscan-link" href="#" target="_blank">
+        🔍 View on Polygonscan ↗
+      </a>
+    </div>
+
+    <div class="qr-section show" id="qr-section">
+      <div id="qr-container"><div id="qrcode"></div></div>
+      <p class="qr-hint">QR code encodes the bill hash. Anyone can scan to verify.</p>
+      <div style="display:flex; gap:0.75rem;">
+        <button class="btn btn-outline" onclick="downloadQR()">⬇ Download QR</button>
+        <button class="btn btn-outline" onclick="switchTab(1); prefillVerify()">Verify This Bill →</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PANEL 1 — VERIFY -->
+<!-- ============================================================ -->
+<div class="panel" id="panel-1">
+
+  <div class="card">
+    <div class="card-title"><span class="icon">🔎</span>Verify a Bill</div>
+    <p style="font-size:0.85rem; color:var(--muted); margin-bottom:1.5rem;">
+      Enter the exact bill details. The hash is computed locally, then queried from the smart contract on Polygon.
+    </p>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Invoice Number *</label>
+        <input id="v-inv-num" type="text" placeholder="INV-2024-001">
+      </div>
+      <div class="form-group">
+        <label>Date *</label>
+        <input id="v-inv-date" type="date">
+      </div>
+      <div class="form-group">
+        <label>Vendor / Issuer *</label>
+        <input id="v-vendor" type="text" placeholder="Acme Pvt. Ltd.">
+      </div>
+      <div class="form-group">
+        <label>Customer / Recipient *</label>
+        <input id="v-customer" type="text" placeholder="Rahul Sharma">
+      </div>
+      <div class="form-group">
+        <label>Amount (₹) *</label>
+        <input id="v-amount" type="number" placeholder="15000">
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="v-category">
+          <option value="services">Services</option>
+          <option value="goods">Goods / Products</option>
+          <option value="consulting">Consulting</option>
+          <option value="medical">Medical</option>
+          <option value="utilities">Utilities</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-grid full">
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="v-desc" placeholder="Brief description…"></textarea>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-block" id="verify-btn" onclick="verifyBill()">
+      <span id="verify-spinner" style="display:none" class="spinner"></span>
+      <span id="verify-btn-text">🔎 Verify on Blockchain</span>
+    </button>
+  </div>
+
+  <!-- VERIFY RESULT -->
+  <div id="verify-result" class="verify-result">
+    <div class="verify-icon" id="verify-icon"></div>
+    <h2 id="verify-heading"></h2>
+    <p id="verify-msg" style="color:var(--muted); font-size:0.9rem; margin-top:0.5rem;"></p>
+
+    <div class="verify-detail" id="verify-detail-box">
+      <div>Computed Hash: <span id="v-hash-display">—</span></div>
+      <div>Registered By: <span id="v-issuer-display">—</span></div>
+      <div>Registered At: <span id="v-time-display">—</span></div>
+      <div>Invoice#: <span id="v-invnum-display">—</span></div>
+    </div>
+
+    <a id="v-polygonscan-link" class="polygonscan-link" href="#" target="_blank" style="margin-top:1rem; display:none;">
+      🔍 Check on Polygonscan ↗
+    </a>
+  </div>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PANEL 2 — LEDGER -->
+<!-- ============================================================ -->
+<div class="panel" id="panel-2">
+  <div class="card">
+    <div class="card-title"><span class="icon">📒</span>Session Ledger</div>
+    <div id="ledger-empty">No bills issued this session yet.</div>
+    <div id="ledger-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Invoice #</th>
+            <th>Vendor</th>
+            <th>Amount</th>
+            <th>Date</th>
+            <th>Hash (truncated)</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="ledger-body"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="status info show" style="margin-top:0;">
+    ℹ️ Bills are permanently stored on Polygon blockchain — not in this browser. Refresh without worry.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- JAVASCRIPT -->
+<!-- ============================================================ -->
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+//  CONFIGURATION — update CONTRACT_ADDRESS after deploying BillProof.sol
+// ─────────────────────────────────────────────────────────────────────────────
+const CONTRACT_ADDRESS = "0x90b4817dA989f9C3DAf4E4e54F84A006AA133827";
+
+const POLYGON_AMOY = {
+  chainId: "0x13882",    // 80002 in hex
+  chainName: "Polygon Amoy Testnet",
+  nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
+  rpcUrls: ["https://rpc-amoy.polygon.technology"],
+  blockExplorerUrls: ["https://amoy.polygonscan.com"],
+};
+
+// Minimal ABI — only the functions we need
+const ABI = [
+  "function registerBill(bytes32 billHash, string calldata invoiceNum) external",
+  "function verifyBill(bytes32 billHash) external view returns (bool exists, address issuer, uint256 timestamp, string memory invoiceNum)",
+  "function totalBills() external view returns (uint256)",
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────────────────────────────────────
+let provider, signer, contract;
+let walletConnected = false;
+let lastIssuedData  = null;
+let stats = { total: 0, verified: 0, flagged: 0 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  WALLET CONNECTION
+// ─────────────────────────────────────────────────────────────────────────────
+async function connectWallet() {
+  if (!window.ethereum) {
+    alert("MetaMask not detected. Please install MetaMask from metamask.io");
+    return;
+  }
+  try {
+    // Request accounts
+    await window.ethereum.request({ method: "eth_requestAccounts" });
+
+    // Switch / add Polygon Amoy
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: POLYGON_AMOY.chainId }],
+      });
+    } catch (switchErr) {
+      if (switchErr.code === 4902) {
+        await window.ethereum.request({
+          method: "wallet_addEthereumChain",
+          params: [POLYGON_AMOY],
+        });
+      }
+    }
+
+  provider = new ethers.BrowserProvider(window.ethereum, {
+    chainId: 80002,
+    name: "polygon-amoy",
+    ensAddress: null
+  });
+  signer = await provider.getSigner();
+  contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+
+    const address = await signer.getAddress();
+    const short   = address.slice(0,6) + "…" + address.slice(-4);
+
+    document.getElementById("wallet-label").textContent = short;
+    document.getElementById("wallet-dot").classList.add("connected");
+    document.getElementById("connect-overlay").classList.add("hidden");
+
+    // Show contract address in stats bar
+    const ca = CONTRACT_ADDRESS;
+    document.getElementById("stat-contract").textContent =
+      ca === "0xYOUR_DEPLOYED_CONTRACT_ADDRESS_HERE"
+        ? "Not deployed yet"
+        : ca.slice(0,8) + "…" + ca.slice(-6);
+
+    walletConnected = true;
+
+    // Refresh on-chain total
+    try {
+      const total = await contract.totalBills();
+      stats.total = Number(total);
+      updateStats();
+    } catch(_) {}
+
+    // Listen for account/chain changes
+    window.ethereum.on("accountsChanged", () => location.reload());
+    window.ethereum.on("chainChanged",    () => location.reload());
+
+  } catch (err) {
+    console.error(err);
+    alert("Connection failed: " + (err.message || err));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  HASH HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function canonicalString(num, date, vendor, customer, amount, category, desc) {
+  return [
+    num.trim(),
+    date,
+    vendor.trim().toLowerCase(),
+    customer.trim().toLowerCase(),
+    amount.trim(),
+    category,
+    desc.trim().toLowerCase(),
+  ].join("||");
+}
+
+function keccak256hex(str) {
+  // ethers.js keccak256 on UTF-8 bytes → bytes32 hex string
+  const bytes = ethers.toUtf8Bytes(str);
+  return ethers.keccak256(bytes); // returns "0x…" (66 chars)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ISSUE BILL
+// ─────────────────────────────────────────────────────────────────────────────
+async function issueBill() {
+  if (!walletConnected) { await connectWallet(); return; }
+
+  const num      = document.getElementById("inv-num").value.trim();
+  const date     = document.getElementById("inv-date").value;
+  const vendor   = document.getElementById("vendor").value.trim();
+  const customer = document.getElementById("customer").value.trim();
+  const amount   = document.getElementById("amount").value.trim();
+  const category = document.getElementById("category").value;
+  const desc     = document.getElementById("desc").value.trim();
+
+  if (!num || !date || !vendor || !customer || !amount) {
+    showStatus("issue-status", "error", "⚠️ Please fill in all required fields.");
+    return;
+  }
+
+  const btn     = document.getElementById("issue-btn");
+  const spinner = document.getElementById("issue-spinner");
+  const btnText = document.getElementById("issue-btn-text");
+
+  btn.disabled = true;
+  spinner.style.display = "inline-block";
+  btnText.textContent = "Waiting for MetaMask…";
+
+  try {
+    const raw      = canonicalString(num, date, vendor, customer, amount, category, desc);
+    const hashHex  = keccak256hex(raw);            // "0x…" 32-byte hex
+    const hash32   = hashHex;                      // bytes32 for contract
+
+    btnText.textContent = "Writing to Polygon…";
+
+    // Send transaction to smart contract
+    const tx = await contract.registerBill(hashHex, num, {
+      maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"),
+      maxFeePerGas: ethers.parseUnits("50", "gwei"),
+    });
+    btnText.textContent = "Waiting for confirmation…";
+    showStatus("issue-status", "info", "⏳ Transaction submitted. Waiting for block confirmation…");
+
+    const receipt = await tx.wait(1);  // wait 1 confirmation
+
+    // Update UI
+    document.getElementById("hash-display").textContent = hashHex;
+    document.getElementById("tx-display").textContent   = receipt.hash;
+    document.getElementById("block-display").textContent = receipt.blockNumber.toString();
+    document.getElementById("gas-display").textContent   = receipt.gasUsed.toString() + " gas";
+
+    const explorerBase = POLYGON_AMOY.blockExplorerUrls[0];
+    const link = document.getElementById("polygonscan-link");
+    link.href  = `${explorerBase}/tx/${receipt.hash}`;
+
+    generateQR(hashHex, num);
+    document.getElementById("result-card").style.display = "block";
+
+    showStatus("issue-status", "success",
+      `✅ Bill registered on Polygon! Block ${receipt.blockNumber}. TX: ${receipt.hash.slice(0,18)}…`
+    );
+
+    lastIssuedData = { num, date, vendor, customer, amount, category, desc, hash: hashHex };
+
+    stats.total++;
+    updateStats();
+    addLedgerRow({ num, vendor, amount, date, hash: hashHex, tx: receipt.hash });
+
+  } catch (err) {
+    console.error(err);
+    const msg = err?.reason || err?.message || "Unknown error";
+
+    if (msg.includes("BillAlreadyExists")) {
+      showStatus("issue-status", "warning", "⚠️ This exact bill is already registered on-chain. No duplicate needed.");
+    } else if (err.code === 4001) {
+      showStatus("issue-status", "error", "❌ Transaction rejected by user.");
+    } else {
+      showStatus("issue-status", "error", "❌ Error: " + msg);
+    }
+  } finally {
+    btn.disabled = false;
+    spinner.style.display = "none";
+    btnText.textContent = "🔗 Register on Blockchain";
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  VERIFY BILL
+// ─────────────────────────────────────────────────────────────────────────────
+async function verifyBill() {
+  if (!walletConnected) { await connectWallet(); return; }
+
+  const num      = document.getElementById("v-inv-num").value.trim();
+  const date     = document.getElementById("v-inv-date").value;
+  const vendor   = document.getElementById("v-vendor").value.trim();
+  const customer = document.getElementById("v-customer").value.trim();
+  const amount   = document.getElementById("v-amount").value.trim();
+  const category = document.getElementById("v-category").value;
+  const desc     = document.getElementById("v-desc").value.trim();
+
+  if (!num || !date || !vendor || !customer || !amount) {
+    alert("Please fill in all required fields.");
+    return;
+  }
+
+  const spinner = document.getElementById("verify-spinner");
+  const btnText = document.getElementById("verify-btn-text");
+  spinner.style.display = "inline-block";
+  btnText.textContent = "Querying chain…";
+
+  try {
+    const raw     = canonicalString(num, date, vendor, customer, amount, category, desc);
+    const hashHex = keccak256hex(raw);
+
+    // Read-only call — free, no gas
+    const [exists, issuer, timestamp, invoiceNum] = await contract.verifyBill(hashHex);
+
+    const result = document.getElementById("verify-result");
+    result.classList.add("show");
+
+    document.getElementById("v-hash-display").textContent = hashHex;
+
+    if (exists) {
+      result.className = "verify-result show legit";
+      document.getElementById("verify-icon").textContent    = "✅";
+      document.getElementById("verify-heading").textContent = "AUTHENTIC";
+      document.getElementById("verify-msg").textContent     =
+        "This bill's hash matches an immutable record on the Polygon blockchain. No tampering possible.";
+
+      const ts = new Date(Number(timestamp) * 1000).toLocaleString();
+      document.getElementById("v-issuer-display").textContent  = issuer;
+      document.getElementById("v-time-display").textContent    = ts;
+      document.getElementById("v-invnum-display").textContent  = invoiceNum;
+      document.getElementById("verify-detail-box").style.display = "block";
+
+      const vLink = document.getElementById("v-polygonscan-link");
+      vLink.href  = `${POLYGON_AMOY.blockExplorerUrls[0]}/address/${CONTRACT_ADDRESS}`;
+      vLink.style.display = "inline-flex";
+
+      stats.verified++;
+    } else {
+      result.className = "verify-result show fake";
+      document.getElementById("verify-icon").textContent    = "❌";
+      document.getElementById("verify-heading").textContent = "NOT FOUND / TAMPERED";
+      document.getElementById("verify-msg").textContent     =
+        "No matching hash on Polygon. This bill was never registered, or its data has been altered.";
+      document.getElementById("verify-detail-box").style.display = "block";
+      document.getElementById("v-issuer-display").textContent  = "—";
+      document.getElementById("v-time-display").textContent    = "—";
+      document.getElementById("v-invnum-display").textContent  = "—";
+
+      stats.flagged++;
+    }
+
+    updateStats();
+
+  } catch (err) {
+    console.error(err);
+    alert("Verification error: " + (err.message || err));
+  } finally {
+    spinner.style.display = "none";
+    btnText.textContent   = "🔎 Verify on Blockchain";
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  UI HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function switchTab(idx) {
+  document.querySelectorAll(".panel").forEach((p,i) => p.classList.toggle("active", i===idx));
+  document.querySelectorAll(".tab").forEach((t,i)   => t.classList.toggle("active",  i===idx));
+}
+
+function prefillVerify() {
+  if (!lastIssuedData) return;
+  const d = lastIssuedData;
+  document.getElementById("v-inv-num").value  = d.num;
+  document.getElementById("v-inv-date").value = d.date;
+  document.getElementById("v-vendor").value   = d.vendor;
+  document.getElementById("v-customer").value = d.customer;
+  document.getElementById("v-amount").value   = d.amount;
+  document.getElementById("v-desc").value     = d.desc;
+}
+
+function showStatus(id, type, msg) {
+  const el = document.getElementById(id);
+  el.className = "status show " + type;
+  el.textContent = msg;
+}
+
+function updateStats() {
+  document.getElementById("stat-total").textContent    = stats.total;
+  document.getElementById("stat-verified").textContent = stats.verified;
+  document.getElementById("stat-flagged").textContent  = stats.flagged;
+}
+
+function addLedgerRow({ num, vendor, amount, date, hash, tx }) {
+  document.getElementById("ledger-empty").style.display = "none";
+  document.getElementById("ledger-wrap").style.display  = "block";
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${num}</td>
+    <td>${vendor}</td>
+    <td>₹${parseInt(amount).toLocaleString("en-IN")}</td>
+    <td>${date}</td>
+    <td style="color:var(--blue); font-family:var(--mono); font-size:0.75rem;">${hash.slice(0,14)}…</td>
+    <td><span class="pill ok">On-Chain ✅</span></td>
+  `;
+  document.getElementById("ledger-body").prepend(tr);
+}
+
+function generateQR(hash, invNum) {
+  document.getElementById("qrcode").innerHTML = "";
+  // Shortened data to avoid QR code length overflow
+  const data = `bp:${hash.slice(0,18)}|${invNum.slice(0,12)}`;
+  new QRCode(document.getElementById("qrcode"), {
+    text: data, width: 160, height: 160,
+    colorDark: "#000000", colorLight: "#ffffff",
+    correctLevel: QRCode.CorrectLevel.L,  // L = lowest correction = more data capacity
+  });
+}
+
+function downloadQR() {
+  const canvas = document.querySelector("#qrcode canvas");
+  if (!canvas) return;
+  const a = document.createElement("a");
+  a.download = "billproof-qr.png";
+  a.href = canvas.toDataURL();
+  a.click();
+}
+
+function copyText(id) {
+  const text = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.target;
+    btn.textContent = "copied!";
+    setTimeout(() => btn.textContent = "copy", 1500);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  INIT
+// ─────────────────────────────────────────────────────────────────────────────
+document.getElementById("inv-date").valueAsDate = new Date();
+document.getElementById("v-inv-date").valueAsDate = new Date();
+</script>
+</body>
+</html>
