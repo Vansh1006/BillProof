@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -432,7 +433,7 @@
       <div id="qr-container"><div id="qrcode"></div></div>
       <p class="qr-hint">QR code encodes the bill hash. Anyone can scan to verify.</p>
       <div style="display:flex; gap:0.75rem;">
-        <button class="btn btn-outline" onclick="downloadQR()">⬇ Download QR</button>
+        <button class="btn btn-outline" onclick="downloadBillPDF()">⬇ Download Bill PDF</button>
         <button class="btn btn-outline" onclick="switchTab(1); prefillVerify()">Verify This Bill →</button>
       </div>
     </div>
@@ -878,13 +879,174 @@ function addLedgerRow({ num, vendor, amount, date, hash, tx }) {
 
 function generateQR(hash, invNum) {
   document.getElementById("qrcode").innerHTML = "";
-  // Shortened data to avoid QR code length overflow
-  const data = `bp:${hash.slice(0,18)}|${invNum.slice(0,12)}`;
+  // QR contains just the hash — short enough, meaningful enough
   new QRCode(document.getElementById("qrcode"), {
-    text: data, width: 160, height: 160,
+    text: hash,
+    width: 160, height: 160,
     colorDark: "#000000", colorLight: "#ffffff",
-    correctLevel: QRCode.CorrectLevel.L,  // L = lowest correction = more data capacity
+    correctLevel: QRCode.CorrectLevel.M,
   });
+}
+
+async function downloadBillPDF() {
+  if (!lastIssuedData) return;
+  const d = lastIssuedData;
+
+  // Wait a moment for QR canvas to render
+  await new Promise(r => setTimeout(r, 300));
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const W = 210; // A4 width in mm
+
+  // ── Header bar ──
+  doc.setFillColor(10, 14, 26);
+  doc.rect(0, 0, W, 28, "F");
+  doc.setTextColor(99, 179, 237);
+  doc.setFontSize(20);
+  doc.setFont("helvetica", "bold");
+  doc.text("BillProof", 14, 13);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(180, 200, 220);
+  doc.text("FRAUD-PROOF BILLING ON POLYGON BLOCKCHAIN", 14, 21);
+  doc.setTextColor(104, 211, 145);
+  doc.text("BLOCKCHAIN VERIFIED", W - 14, 13, { align: "right" });
+  doc.setFontSize(7);
+  doc.setTextColor(150, 170, 190);
+  doc.text("Network: Polygon Amoy Testnet", W - 14, 20, { align: "right" });
+
+  // ── Title ──
+  doc.setTextColor(30, 30, 30);
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text("TAX INVOICE", 14, 42);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(100, 100, 100);
+  doc.text(`Invoice No: ${d.num}`, 14, 50);
+  doc.text(`Date: ${d.date}`, 14, 57);
+
+  // ── Divider ──
+  doc.setDrawColor(200, 210, 220);
+  doc.setLineWidth(0.3);
+  doc.line(14, 62, W - 14, 62);
+
+  // ── Vendor / Customer ──
+  doc.setFontSize(8);
+  doc.setTextColor(100, 100, 100);
+  doc.setFont("helvetica", "bold");
+  doc.text("FROM (VENDOR / ISSUER)", 14, 70);
+  doc.text("TO (CUSTOMER / RECIPIENT)", W / 2 + 5, 70);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(30, 30, 30);
+  doc.setFontSize(11);
+  doc.text(d.vendor, 14, 78);
+  doc.text(d.customer, W / 2 + 5, 78);
+
+  // ── Divider ──
+  doc.setDrawColor(200, 210, 220);
+  doc.line(14, 84, W - 14, 84);
+
+  // ── Bill Details Table ──
+  doc.setFillColor(240, 245, 255);
+  doc.rect(14, 87, W - 28, 10, "F");
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(60, 80, 120);
+  doc.text("DESCRIPTION", 17, 94);
+  doc.text("CATEGORY", 110, 94);
+  doc.text("AMOUNT", W - 14, 94, { align: "right" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(30, 30, 30);
+  doc.setFontSize(10);
+  const descText = d.desc && d.desc !== "None" ? d.desc : "Services rendered";
+  doc.text(descText.slice(0, 55), 17, 105);
+  doc.text(d.category || "Services", 110, 105);
+  doc.setFont("helvetica", "bold");
+  doc.text(`Rs. ${parseInt(d.amount).toLocaleString("en-IN")}`, W - 14, 105, { align: "right" });
+
+  doc.setDrawColor(200, 210, 220);
+  doc.line(14, 112, W - 14, 112);
+
+  // ── Total ──
+  doc.setFillColor(10, 14, 26);
+  doc.rect(W - 80, 114, 66, 14, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text("TOTAL AMOUNT", W - 77, 120);
+  doc.setFontSize(12);
+  doc.text(`Rs. ${parseInt(d.amount).toLocaleString("en-IN")}`, W - 14, 124, { align: "right" });
+
+  // ── Blockchain Proof Section ──
+  doc.setTextColor(30, 30, 30);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("BLOCKCHAIN PROOF", 14, 140);
+  doc.setDrawColor(99, 179, 237);
+  doc.setLineWidth(0.5);
+  doc.line(14, 142, 80, 142);
+
+  doc.setFillColor(245, 248, 255);
+  doc.setDrawColor(180, 200, 230);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(14, 145, W - 28, 48, 3, 3, "FD");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(80, 100, 140);
+  doc.text("Bill Hash (keccak256):", 18, 153);
+  doc.setFont("courier", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(30, 30, 100);
+  // Split hash across two lines if needed
+  doc.text(d.hash.slice(0, 42), 18, 159);
+  doc.text(d.hash.slice(42), 18, 165);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(80, 100, 140);
+  doc.text("Smart Contract:", 18, 173);
+  doc.setFont("courier", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(30, 30, 100);
+  doc.text(CONTRACT_ADDRESS, 18, 179);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(80, 100, 140);
+  doc.text("Network:", 18, 187);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(30, 30, 100);
+  doc.text("Polygon Amoy Testnet (Chain ID: 80002)", 45, 187);
+
+  // ── QR Code ──
+  const canvas = document.querySelector("#qrcode canvas");
+  if (canvas) {
+    const qrData = canvas.toDataURL("image/png");
+    doc.addImage(qrData, "PNG", W - 60, 138, 46, 46);
+    doc.setFontSize(6.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text("Scan to verify hash", W - 37, 187, { align: "center" });
+  }
+
+  // ── Footer ──
+  doc.setFillColor(10, 14, 26);
+  doc.rect(0, 272, W, 25, "F");
+  doc.setTextColor(99, 179, 237);
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "bold");
+  doc.text("This bill is cryptographically anchored on the Polygon blockchain.", 14, 280);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(150, 170, 200);
+  doc.text("Verify at: amoy.polygonscan.com | BillProof — Fraud-Proof Billing", 14, 286);
+  doc.setTextColor(80, 100, 130);
+  doc.text(`Generated: ${new Date().toLocaleString()}`, W - 14, 286, { align: "right" });
+
+  doc.save(`BillProof-${d.num}.pdf`);
 }
 
 function downloadQR() {
